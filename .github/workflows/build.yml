@@ -1,4 +1,4 @@
-name: Build PanDa Mod
+name: Build PanDa Mod (Debug)
 
 on:
   push:
@@ -19,126 +19,110 @@ jobs:
       with:
         ndk-version: r26d
 
-    - name: Detect Project Structure
+    - name: DEBUG - Show Full Structure
       run: |
-        echo "=== Struktur Repo ==="
-        find . -name "Main.cpp" -o -name "*.cpp" | head -30
-        find . -name "CMakeLists.txt" -o -name "Android.mk" | head -5
-        echo "=== DONE ==="
+        echo "========== ROOT =========="
+        ls -la
+        echo "========== SEMUA FOLDER =========="
+        find . -type d | grep -v ".git" | sort
+        echo "========== SEMUA FILE CPP/H =========="
+        find . \( -name "*.cpp" -o -name "*.c" -o -name "*.h" \) | grep -v ".git" | sort
+        echo "========== CARI Main.cpp =========="
+        find . -iname "main.cpp" -o -iname "Main.cpp"
+        echo "========== STRUKTURE SELESAI =========="
 
     - name: Compile Native Library (ARM32)
       run: |
-        # Auto-detect folder Main.cpp
+        set -e
+        
         CPP_DIR=$(find . -name "Main.cpp" -exec dirname {} \; | head -1)
-        echo "CPP Directory: $CPP_DIR"
-        cd "$CPP_DIR"
         
-        # Compiler ARM32 (armeabi-v7a, API 21)
-        CXX=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang++
-        
-        # Kumpulkan semua source files otomatis
-        SOURCES=""
-        for f in Main.cpp \
-                 KittyMemory/KittyMemory.cpp \
-                 KittyMemory/MemoryPatch.cpp \
-                 KittyMemory/MemoryBackup.cpp \
-                 KittyMemory/KittyUtils.cpp \
-                 Substrate/SubstrateHook.cpp \
-                 Substrate/SubstrateDebug.cpp \
-                 Substrate/SubstratePosixMemory.cpp \
-                 Substrate/SymbolFinder.cpp \
-                 Substrate/hde64.c \
-                 And64InlineHook/And64InlineHook.cpp; do
-            if [ -f "$f" ]; then
-                SOURCES="$SOURCES $f"
-                echo "Adding: $f"
-            else
-                echo "SKIP (not found): $f"
-            fi
-        done
-        
-        # Auto-detect .cpp/.c tambahan yang terlewat
-        EXTRA=$(find . -name "*.cpp" -o -name "*.c" | \
-                grep -v -E "(Main.cpp|KittyMemory/|Substrate/|And64InlineHook/)" | tr '\n' ' ')
-        if [ ! -z "$EXTRA" ]; then
-            echo "Extra sources: $EXTRA"
-            SOURCES="$SOURCES $EXTRA"
+        # FALLBACK: kalau Main.cpp tidak ada, cari main.cpp
+        if [ -z "$CPP_DIR" ]; then
+          CPP_DIR=$(find . -name "main.cpp" -exec dirname {} \; | head -1)
         fi
         
-        echo "=== COMPILING ==="
-        echo "Sources: $SOURCES"
+        # FALLBACK 2: pakai folder cpp/jni apapun yang ada
+        if [ -z "$CPP_DIR" ]; then
+          CPP_DIR=$(find . -type d \( -name "cpp" -o -name "jni" \) | grep -v ".git" | head -1)
+        fi
         
+        if [ -z "$CPP_DIR" ]; then
+          echo "❌ ERROR: Tidak menemukan folder source C++!"
+          echo "Cek log 'DEBUG - Show Full Structure' di atas"
+          exit 1
+        fi
+        
+        echo "✅ Menggunakan folder: $CPP_DIR"
+        cd "$CPP_DIR"
+        echo "=== ISI FOLDER ==="
+        ls -la
+        
+        CXX=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang++
+        
+        echo "=== COMPILER CHECK ==="
+        $CXX --version | head -1
+        
+        # Build source list
+        SOURCES=""
+        for f in $(find . -maxdepth 2 \( -name "*.cpp" -o -name "*.c" \) | sort); do
+          SOURCES="$SOURCES $f"
+          echo "Include: $f"
+        done
+        
+        if [ -z "$SOURCES" ]; then
+          echo "❌ ERROR: Tidak ada file .cpp/.c!"
+          exit 1
+        fi
+        
+        echo "=== INCLUDE DIRS ==="
+        INCS=""
+        for d in . Includes KittyMemory Substrate And64InlineHook Menu jni; do
+          if [ -d "$d" ]; then
+            INCS="$INCS -I$d"
+            echo "Include dir: $d"
+          fi
+        done
+        
+        echo "=== MULAI COMPILE ==="
+        set +e
         $CXX -std=c++17 \
           -shared -fPIC \
           -fvisibility=hidden \
           -Wno-error=format-security \
           -Wno-error=c++11-narrowing \
           -fno-rtti -fno-exceptions -fpermissive \
-          -O2 -s \
+          -O2 \
           -o libPanDa.so \
           $SOURCES \
           -llog -landroid -lGLESv2 \
-          -I. \
-          -IIncludes \
-          -IKittyMemory \
-          -ISubstrate \
-          -IAnd64InlineHook \
-          -IMenu \
-          -Ijni 2>/dev/null || true
+          $INCS 2>&1 | tee compile_log.txt
+        COMPILE_EXIT=$?
+        set -e
         
-        # Cek hasil
-        if [ -f "libPanDa.so" ]; then
-            echo "=== BUILD SUCCESS ==="
-            ls -la libPanDa.so
-            file libPanDa.so
-        else
-            echo "=== RETRY tanpa include jni ==="
-            $CXX -std=c++17 \
-              -shared -fPIC \
-              -fvisibility=hidden \
-              -Wno-error=format-security \
-              -Wno-error=c++11-narrowing \
-              -fno-rtti -fno-exceptions -fpermissive \
-              -O2 -s \
-              -o libPanDa.so \
-              $SOURCES \
-              -llog -landroid -lGLESv2 \
-              -I. \
-              -IIncludes \
-              -IKittyMemory \
-              -ISubstrate \
-              -IAnd64InlineHook \
-              -IMenu
-            
-            ls -la libPanDa.so
-            file libPanDa.so
+        if [ $COMPILE_EXIT -ne 0 ] || [ ! -f "libPanDa.so" ]; then
+          echo "❌ COMPILE GAGAL!"
+          echo "=== 50 BARIS ERROR TERAKHIR ==="
+          tail -50 compile_log.txt
+          exit 1
         fi
+        
+        echo "=== BUILD SUCCESS ==="
+        ls -la libPanDa.so
+        file libPanDa.so
 
-    - name: Prepare Output (libPanDa.so + libGamEs.so)
+    - name: Prepare Output
       run: |
         mkdir -p output/
         CPP_DIR=$(find . -name "Main.cpp" -exec dirname {} \; | head -1)
+        [ -z "$CPP_DIR" ] && CPP_DIR=$(find . -name "main.cpp" -exec dirname {} \; | head -1)
         
-        # Copy library utama
         cp "$CPP_DIR/libPanDa.so" output/
-        
-        # Copy & RENAME STL → libGamEs.so
         cp $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/libc++_shared.so output/libGamEs.so
         
-        # Verifikasi arsitektur ARM32
-        echo "=== VERIFIKASI ==="
+        echo "=== VERIFIKASI ARM32 ==="
         file output/libPanDa.so
         file output/libGamEs.so
-        
-        # Cek harus ARM EABI (32-bit)
-        if file output/libPanDa.so | grep -q "ARM"; then
-            echo "✅ ARM32 CONFIRMED"
-        else
-            echo "❌ WRONG ARCHITECTURE!"
-            exit 1
-        fi
-        
-        echo "=== FILES ==="
         ls -la output/
 
     - name: Upload Artifact
