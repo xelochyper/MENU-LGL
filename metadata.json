@@ -1,0 +1,6 @@
+{
+  "name": "Mod Menu LGL BUSSID",
+  "description": "LGL Mod Menu for Bus Simulator Indonesia featuring unlimited money, unlock all buses, teleportation, speed hack, wallhack, super heavy bus collision, and admin ban panel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
