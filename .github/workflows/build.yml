@@ -19,60 +19,67 @@ jobs:
       with:
         ndk-version: r26d
 
-    - name: Build
+    - name: Build Native Library
       run: |
-        # Find cpp directory
-        CPP_DIR=$(find . -name "Main.cpp" -exec dirname {} \; | head -1)
+        echo "========== STRUKTUR =========="
+        find . -name "*.cpp" -o -name "*.c" | grep -v ".git" | sort
         
-        if [ -z "$CPP_DIR" ]; then
-          CPP_DIR=$(find . -type d \( -name "cpp" -o -name "jni" \) -not -path "*/.git/*" | head -1)
-        fi
-        
-        echo "Building in: $CPP_DIR"
+        # Cari folder Main.cpp
+        CPP_DIR=$(dirname $(find . -name "Main.cpp" | head -1))
+        [ -z "$CPP_DIR" ] && CPP_DIR="."
+        echo "Folder: $CPP_DIR"
         cd "$CPP_DIR"
-        ls -la
         
         CXX=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang++
         
-        # Collect sources
+        # AUTO-DETECT semua file source
         SOURCES=""
         for f in $(find . -maxdepth 2 \( -name "*.cpp" -o -name "*.c" \) | sort); do
           SOURCES="$SOURCES $f"
+          echo "+ $f"
         done
+        
+        # AUTO-DETECT semua include dirs
+        INCS=""
+        for d in $(find . -maxdepth 2 -type d | grep -v ".git" | sort); do
+          INCS="$INCS -I$d"
+        done
+        
+        echo "========== COMPILE =========="
         echo "Sources: $SOURCES"
         
-        # Collect includes
-        INCS=""
-        for d in . Includes KittyMemory Substrate And64InlineHook Menu; do
-          [ -d "$d" ] && INCS="$INCS -I$d"
-        done
-        
-        # COMPILE
         $CXX -std=c++17 \
           -shared -fPIC \
-          -fno-rtti -fno-exceptions \
+          -fno-rtti -fno-exceptions -fpermissive \
           -Wno-everything \
           -o libPanDa.so \
           $SOURCES \
           -llog -landroid \
-          $INCS
+          $INCS 2>&1 | tail -30
         
-        # Verify
+        # Cek hasil
+        if [ ! -f "libPanDa.so" ]; then
+          echo "❌ GAGAL - libPanDa.so tidak dibuat"
+          exit 1
+        fi
+        
+        echo "========== SUCCESS =========="
         ls -la libPanDa.so
         file libPanDa.so
 
-    - name: Output
+    - name: Prepare Output
       run: |
         mkdir -p output/
-        CPP_DIR=$(find . -name "Main.cpp" -exec dirname {} \; | head -1)
-        [ -z "$CPP_DIR" ] && CPP_DIR=$(find . -type d \( -name "cpp" -o -name "jni" \) -not -path "*/.git/*" | head -1)
+        CPP_DIR=$(dirname $(find . -name "Main.cpp" | head -1))
+        [ -z "$CPP_DIR" ] && CPP_DIR="."
         
         cp "$CPP_DIR/libPanDa.so" output/
         cp $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/libc++_shared.so output/libGamEs.so
         
+        echo "=== FILES ==="
         file output/*
 
-    - name: Upload
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
         name: PanDa-Mod
