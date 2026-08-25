@@ -31,46 +31,26 @@ jobs:
       with:
         ndk-version: r25b
 
-    - name: FIX: Remove SDK packages with 'x' version (34x/35x/36x crash)
+    - name: Remove problematic SDK packages
       run: |
-        echo "=== BEFORE ==="
-        ls $ANDROID_SDK_ROOT/platforms/ 2>/dev/null
-        ls $ANDROID_SDK_ROOT/build-tools/ 2>/dev/null
-        
-        # Remove ALL SDK packages with 'x' in version
         grep -rl 'version="[0-9]*x' $ANDROID_SDK_ROOT --include="package.xml" 2>/dev/null | while read f; do
-          echo "Removing: $(dirname "$f")"
           rm -rf "$(dirname "$f")"
         done
-        
-        echo "=== AFTER ==="
-        ls $ANDROID_SDK_ROOT/platforms/ 2>/dev/null
-        ls $ANDROID_SDK_ROOT/build-tools/ 2>/dev/null
-        echo "✅ Problematic SDK packages removed"
+        echo "Done"
 
     - name: Download Gradle
       run: |
         wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
         unzip -q gradle-8.5-bin.zip
-        echo "✅ Gradle ready"
 
     - name: Generate Build Files
       run: |
-        echo "=== Checking existing files ==="
-        ls -la
-        find . -name "*.java" | grep -v ".git" | head -10
-        find . -name "Main.cpp" | grep -v ".git"
-        find . -name "AndroidManifest.xml" | grep -v ".git"
-
-        # settings.gradle
         if [ ! -f "settings.gradle" ]; then
           echo 'include ":app"' > settings.gradle
           echo 'rootProject.name = "PanDa-Mod"' >> settings.gradle
-          echo "✅ Generated settings.gradle"
         fi
 
-        # build.gradle (root) — AGP 8.2.0
-        cat > build.gradle << 'GRADLE'
+        cat > build.gradle << 'EOF'
         buildscript {
             repositories {
                 google()
@@ -86,23 +66,18 @@ jobs:
                 mavenCentral()
             }
         }
-        GRADLE
-        echo "✅ Generated build.gradle (AGP 8.2.0)"
+        EOF
 
-        # gradle.properties
-        cat > gradle.properties << 'PROP'
+        cat > gradle.properties << 'EOF'
         android.useAndroidX=true
         android.enableJetifier=true
         org.gradle.jvmargs=-Xmx2048m
-        PROP
-        echo "✅ Generated gradle.properties"
+        EOF
 
-        # local.properties — NO ndk.dir!
         echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
-        echo "✅ Generated local.properties (no ndk.dir)"
 
-        # app/build.gradle — ndkBuild + ndkVersion
-        cat > app/build.gradle << 'GRADLE'
+        mkdir -p app
+        cat > app/build.gradle << 'EOF'
         apply plugin: 'com.android.application'
         android {
             compileSdkVersion 30
@@ -132,17 +107,14 @@ jobs:
         dependencies {
             implementation 'androidx.appcompat:appcompat:1.3.0'
         }
-        GRADLE
-        echo "✅ Generated app/build.gradle (ndkBuild mode)"
+        EOF
 
-        # Android.mk
         JNI_DIR=$(find . -type d -name "jni" | grep -v ".git" | head -1)
         if [ -z "$JNI_DIR" ]; then
           JNI_DIR=$(dirname $(find . -name "Main.cpp" | grep -v cpp/main.cpp | head -1))
         fi
-        echo "JNI dir: $JNI_DIR"
 
-        cat > "$JNI_DIR/Android.mk" << 'MK'
+        cat > "$JNI_DIR/Android.mk" << 'EOF'
         LOCAL_PATH := $(call my-dir)
         include $(CLEAR_VARS)
         LOCAL_MODULE := Maino
@@ -166,24 +138,17 @@ jobs:
         LOCAL_LDLIBS := -llog -landroid -lGLESv2
         LOCAL_CFLAGS := -std=c++17 -fno-rtti -fno-exceptions -fpermissive -Wno-everything
         include $(BUILD_SHARED_LIBRARY)
-        MK
-        echo "✅ Generated Android.mk (skip Utils.cpp)"
+        EOF
 
-        # Application.mk
-        cat > "$JNI_DIR/Application.mk" << 'MK'
+        cat > "$JNI_DIR/Application.mk" << 'EOF'
         APP_PLATFORM := android-21
         APP_ABI := armeabi-v7a
         APP_STL := c++_shared
-        MK
-        echo "✅ Generated Application.mk"
-
-        echo "=== ALL FILES READY ==="
+        EOF
 
     - name: Build APK
       run: |
-        ./gradle-8.5/bin/gradle assembleRelease \
-          -Pandroid.injected.build.abi=armeabi-v7a \
-          --stacktrace 2>&1
+        ./gradle-8.5/bin/gradle assembleRelease -Pandroid.injected.build.abi=armeabi-v7a --stacktrace 2>&1
       env:
         ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
         ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
@@ -191,23 +156,16 @@ jobs:
     - name: Collect Output
       run: |
         mkdir -p output
-
         APK=$(find . -name "*.apk" | head -1)
         if [ -n "$APK" ]; then
           cp "$APK" output/PanDa-Mod.apk
-          echo "✅ APK: $APK"
           cd output
           unzip -o PanDa-Mod.apk classes*.dex
-          echo "✅ classes.dex extracted"
           cd ..
         fi
-
         find . -name "libMaino.so" -exec cp {} output/ \;
         find . -name "libc++_shared.so" -exec cp {} output/libGames.so \;
-
-        echo "=== FINAL OUTPUT ==="
         ls -la output/
-        file output/* 2>/dev/null || true
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
