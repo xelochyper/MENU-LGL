@@ -28,14 +28,13 @@ jobs:
         
         CXX=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang++
         
-        # Kumpulkan sources — TANPA Utils.cpp (butuh xDL yang tidak ada)
+        # Sources — TANPA Utils.cpp (xDL tidak ada)
         SOURCES=""
         for f in $(find . -maxdepth 2 \( -name "*.cpp" -o -name "*.c" \) | grep -v ".git" | grep -v "Utils.cpp" | sort); do
           SOURCES="$SOURCES $f"
         done
         echo "Sources: $SOURCES"
         
-        # Includes
         INCS=""
         for d in $(find . -maxdepth 2 -type d | grep -v ".git" | sort); do
           INCS="$INCS -I$d"
@@ -46,35 +45,37 @@ jobs:
           -shared -fPIC \
           -fno-rtti -fno-exceptions -fpermissive \
           -Wno-everything \
-          -o libPanDa.so \
+          -o libMaino.so \
           $SOURCES \
           -llog -landroid \
           $INCS 2>&1
         
-        if [ ! -f "libPanDa.so" ]; then
+        if [ ! -f "libMaino.so" ]; then
           echo "❌ GAGAL"
           exit 1
         fi
         
         echo "✅ SUCCESS"
-        ls -la libPanDa.so
-        file libPanDa.so
+        ls -la libMaino.so
+        file libMaino.so
 
     - name: Prepare Output
       run: |
         mkdir -p output/
-        CPP_DIR=$(dirname $(find . -name "Main.cpp" | head -1))
+        CPP_DIR=$(dirname $(find . -name "Main.cpp" | grep -v cpp/main.cpp | head -1))
         [ -z "$CPP_DIR" ] && CPP_DIR="."
         
-        cp "$CPP_DIR/libPanDa.so" output/
-        cp $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/libc++_shared.so output/libGamEs.so
+        cp "$CPP_DIR/libMaino.so" output/
+        cp $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/libc++_shared.so output/libGames.so
         
-        echo "=== FILES ==="
-        file output/*
+        echo "=== VERIFIKASI ==="
+        file output/libMaino.so
+        file output/libGames.so
+        ls -la output/
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: PanDa-Mod
+        name: Maino-Mod
         path: output/
         retention-days: 30
