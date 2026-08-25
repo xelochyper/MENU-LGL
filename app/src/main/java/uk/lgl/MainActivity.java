@@ -22,7 +22,7 @@ public class MainActivity extends Activity {
     static {
         // When you change the lib name, change also on Android.mk file
         // Both must have same name
-        System.loadLibrary("MyLibName");
+        System.loadLibrary("Maino");
     }
 
     //To call onCreate, please refer to README.md
