@@ -43,14 +43,34 @@ jobs:
         wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
         unzip -q gradle-8.5-bin.zip
 
-    - name: Generate Build Files
+    - name: Show existing build.gradle
       run: |
-        if [ ! -f "settings.gradle" ]; then
-          echo 'include ":app"' > settings.gradle
-          echo 'rootProject.name = "PanDa-Mod"' >> settings.gradle
+        echo "=== EXISTING build.gradle ==="
+        cat app/build.gradle 2>/dev/null || echo "NOT FOUND"
+
+    - name: Fix build.gradle (add namespace + armeabi-v7a only)
+      run: |
+        # Add namespace if missing
+        if ! grep -q "namespace" app/build.gradle 2>/dev/null; then
+          sed -i '/^android {/a \    namespace "uk.lgl"' app/build.gradle
+          echo "✅ Added namespace"
         fi
 
-        cat > build.gradle << 'EOF'
+        # Change abiFilters to armeabi-v7a only
+        sed -i "s/abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86'/abiFilters 'armeabi-v7a'/" app/build.gradle
+        echo "✅ Changed abiFilters to armeabi-v7a only"
+
+        # Change ndkVersion to match installed NDK
+        sed -i "s/ndkVersion = '22.0.7026061'/ndkVersion '25.2.9519653'/" app/build.gradle
+        echo "✅ Updated ndkVersion"
+
+        echo "=== FIXED build.gradle ==="
+        cat app/build.gradle
+
+    - name: Generate root build.gradle if missing
+      run: |
+        if [ ! -f "build.gradle" ]; then
+          cat > build.gradle << 'EOF'
         buildscript {
             repositories {
                 google()
@@ -67,84 +87,43 @@ jobs:
             }
         }
         EOF
+          echo "✅ Generated root build.gradle"
+        fi
 
-        cat > gradle.properties << 'EOF'
+    - name: Generate gradle.properties if missing
+      run: |
+        if [ ! -f "gradle.properties" ]; then
+          cat > gradle.properties << 'EOF'
         android.useAndroidX=true
         android.enableJetifier=true
         org.gradle.jvmargs=-Xmx2048m
         EOF
-
-        echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
-
-        mkdir -p app
-        cat > app/build.gradle << 'EOF'
-        apply plugin: 'com.android.application'
-        android {
-            compileSdkVersion 30
-            buildToolsVersion "30.0.3"
-            ndkVersion "25.2.9519653"
-            defaultConfig {
-                applicationId "com.android.support"
-                minSdkVersion 21
-                targetSdkVersion 30
-                versionCode 1
-                versionName "1.0"
-                ndk {
-                    abiFilters 'armeabi-v7a'
-                }
-            }
-            externalNativeBuild {
-                ndkBuild {
-                    path "src/main/jni/Android.mk"
-                }
-            }
-            buildTypes {
-                release {
-                    minifyEnabled false
-                }
-            }
-        }
-        dependencies {
-            implementation 'androidx.appcompat:appcompat:1.3.0'
-        }
-        EOF
-
-        JNI_DIR=$(find . -type d -name "jni" | grep -v ".git" | head -1)
-        if [ -z "$JNI_DIR" ]; then
-          JNI_DIR=$(dirname $(find . -name "Main.cpp" | grep -v cpp/main.cpp | head -1))
+          echo "✅ Generated gradle.properties"
         fi
 
-        cat > "$JNI_DIR/Android.mk" << 'EOF'
-        LOCAL_PATH := $(call my-dir)
-        include $(CLEAR_VARS)
-        LOCAL_MODULE := Maino
-        LOCAL_SRC_FILES := Main.cpp \
-            KittyMemory/KittyMemory.cpp \
-            KittyMemory/MemoryPatch.cpp \
-            KittyMemory/MemoryBackup.cpp \
-            KittyMemory/KittyUtils.cpp \
-            Substrate/SubstrateHook.cpp \
-            Substrate/SubstrateDebug.cpp \
-            Substrate/SubstratePosixMemory.cpp \
-            Substrate/SymbolFinder.cpp \
-            Substrate/hde64.c \
-            And64InlineHook/And64InlineHook.cpp
-        LOCAL_C_INCLUDES += $(LOCAL_PATH) \
-            $(LOCAL_PATH)/Includes \
-            $(LOCAL_PATH)/KittyMemory \
-            $(LOCAL_PATH)/Substrate \
-            $(LOCAL_PATH)/And64InlineHook \
-            $(LOCAL_PATH)/Menu
-        LOCAL_LDLIBS := -llog -landroid -lGLESv2
-        LOCAL_CFLAGS := -std=c++17 -fno-rtti -fno-exceptions -fpermissive -Wno-everything
-        include $(BUILD_SHARED_LIBRARY)
-        EOF
+    - name: Generate settings.gradle if missing
+      run: |
+        if [ ! -f "settings.gradle" ]; then
+          echo 'include ":app"' > settings.gradle
+          echo 'rootProject.name = "PanDa-Mod"' >> settings.gradle
+          echo "✅ Generated settings.gradle"
+        fi
 
-        cat > "$JNI_DIR/Application.mk" << 'EOF'
-        APP_PLATFORM := android-21
-        APP_ABI := armeabi-v7a
-        APP_STL := c++_shared
-        EOF
+    - name: Generate local.properties
+      run: |
+        echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+        echo "✅ Generated local.properties"
+
+    - name: Show structure
+      run: |
+        echo "=== JAVA FILES ==="
+        find . -name "*.java" | grep -v ".git" | head -10
+        echo "=== CPP FILES ==="
+        find . -name "Main.cpp" | grep -v ".git"
+        echo "=== Android.mk ==="
+        find . -name "Android.mk" | grep -v ".git"
+        echo "=== AndroidManifest ==="
+        find . -name "AndroidManifest.xml" | grep -v ".git"
 
     - name: Build APK
       run: |
