@@ -48,8 +48,8 @@ Java_uk_lgl_modmenu_FloatingModMenuService_setTitleText(JNIEnv *env, jobject thi
 JNIEXPORT void JNICALL
 Java_uk_lgl_modmenu_FloatingModMenuService_setHeadingText(JNIEnv *env, jobject thiz, jobject obj) {
     setText(env, obj, "<b><marquee><p style=\"font-size:30\">"
-                     "<p style=\"color:#00FFFF;\">XIEPANDA MOD BUSSID</p> | "
-                     "GOD EDITION | 10 FITUR UTAMA</p></marquee></b>");
+                     "<p style=\"color:#00FFFF;\">𝗕𝘂𝗸𝗮 𝗕𝗮𝘁𝗮𝘀, 𝗨𝗯𝗮𝗵 𝗔𝘁𝘂𝗿𝗮𝗻, 𝗠𝗮𝗶𝗻 𝗧𝗮𝗻𝗽𝗮 𝗛𝗮𝗺𝗯𝗮𝘁𝗮𝗻</p> | "
+                     "GOD EDITION by Maino Games</p></marquee></b>");
     
     jclass textViewClass = env->FindClass("android/widget/TextView");
     jmethodID setTextSize = env->GetMethodID(textViewClass, "setTextSize", "(IF)V");
