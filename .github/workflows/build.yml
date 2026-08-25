@@ -1,0 +1,50 @@
+name: Build PanDa Mod
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # Bisa trigger manual juga
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: Setup Android NDK
+      uses: nttld/setup-ndk@v1
+      with:
+        ndk-version: r26d
+
+    - name: Grant Permission
+      run: chmod +x gradlew
+
+    - name: Build APK (ARM32 Only)
+      run: |
+        ./gradlew assembleRelease \
+          -Pandroid.injected.build.abi=armeabi-v7a \
+          -Dorg.gradle.jvmargs="-Xmx2048m"
+      env:
+        ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+
+    - name: Extract .so Files
+      run: |
+        mkdir -p output/
+        find . -name "libPanDa.so" -exec cp {} output/ \;
+        find . -name "libc++_shared.so" -exec cp {} output/ \;
+        cp app/build/outputs/apk/release/*.apk output/ 2>/dev/null || true
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: PanDa-Mod-Build
+        path: output/
+        retention-days: 30
