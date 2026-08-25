@@ -1,4 +1,4 @@
-name: Build PanDa Mod APK
+name: Build PanDa Mod (DEX + SO)
 
 on:
   push:
@@ -23,7 +23,7 @@ jobs:
       uses: android-actions/setup-android@v3
       with:
         sdk-platform: 'android-30'
-        sdk-build-tools: '30.0.3'
+        sdk-build-tools: '33.0.2'
 
     - name: Setup Android NDK
       uses: nttld/setup-ndk@v1
@@ -31,76 +31,134 @@ jobs:
       with:
         ndk-version: r26d
 
-    - name: Grant Permission
-      run: chmod +x ./gradlew
-
-    - name: Debug - Show Structure
+    - name: Show Structure
       run: |
+        echo "=== JAVA FILES ==="
+        find . -name "*.java" | grep -v ".git" | sort
+        echo "=== BUILD FILES ==="
+        find . \( -name "build.gradle" -o -name "settings.gradle" \) | grep -v ".git"
         echo "=== ROOT ==="
         ls -la
-        echo "=== SETTINGS.GRADLE ==="
-        cat settings.gradle 2>/dev/null || echo "tidak ada"
-        echo "=== BUILD.GRADLE (root) ==="
-        cat build.gradle 2>/dev/null || echo "tidak ada"
-        echo "=== BUILD.GRADLE (app) ==="
-        cat app/build.gradle 2>/dev/null || echo "tidak ada"
-        echo "=== MANIFEST ==="
-        find . -name "AndroidManifest.xml" | head -5
-        echo "=== JAVA FILES ==="
-        find . -name "*.java" | head -20
-        echo "=== CPP FILES ==="
-        find . -name "*.cpp" -o -name "*.c" | head -20
-        echo "=== ANDROID.MK ==="
-        find . -name "Android.mk" | head -3
-        echo "=== CMAKELISTS ==="
-        find . -name "CMakeLists.txt" | head -3
 
-    - name: Build APK (assembleRelease)
+    # ============================================================
+    # METHOD 1: GRADLE BUILD (Full APK)
+    # ============================================================
+    - name: Gradle Build (Attempt)
+      id: gradle
+      continue-on-error: true
       run: |
+        # Fix gradle wrapper if missing
+        if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
+          echo "Generating gradle wrapper..."
+          wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
+          unzip -q gradle-8.5-bin.zip
+          ./gradle-8.5/bin/gradle wrapper --gradle-version 8.5
+          rm -rf gradle-8.5-bin.zip gradle-8.5
+        fi
+        chmod +x ./gradlew
+        
         ./gradlew assembleRelease \
           -Pandroid.injected.build.abi=armeabi-v7a \
-          -Dorg.gradle.jvmargs="-Xmx2048m" \
-          --stacktrace
+          --stacktrace 2>&1
       env:
         ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
         ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
-    - name: Prepare Output
+    # ============================================================
+    # METHOD 2: MANUAL BUILD (Fallback - if Gradle fails)
+    # ============================================================
+    - name: Manual Build (Fallback)
+      if: steps.gradle.outcome != 'success'
       run: |
-        mkdir -p output/
+        echo "=== Gradle failed. Using manual build... ==="
+        mkdir -p build/classes output
         
-        # Cari APK hasil build
-        APK_FILE=$(find . -name "*.apk" -path "*/release/*" | head -1)
-        if [ -z "$APK_FILE" ]; then
-          APK_FILE=$(find . -name "*.apk" | grep -v "unsigned" | head -1)
+        ANDROID_JAR=$(find $ANDROID_SDK_ROOT -name "android.jar" | head -1)
+        echo "android.jar: $ANDROID_JAR"
+        
+        # --- STEP 1: COMPILE JAVA → .class ---
+        JAVA_FILES=$(find . -name "*.java" | grep -v ".git")
+        echo "Compiling $(echo "$JAVA_FILES" | wc -l) Java files..."
+        
+        javac -d build/classes -cp "$ANDROID_JAR" $JAVA_FILES 2>&1
+        
+        CLASS_COUNT=$(find build/classes -name "*.class" | wc -l)
+        echo "✅ Compiled: $CLASS_COUNT classes"
+        
+        if [ $CLASS_COUNT -eq 0 ]; then
+          echo "❌ javac failed - no .class files"
+          exit 1
         fi
         
-        if [ -n "$APK_FILE" ]; then
-          cp "$APK_FILE" output/PanDa-Mod.apk
-          echo "✅ APK: $APK_FILE"
+        # --- STEP 2: CONVERT .class → classes.dex ---
+        D8=$(find $ANDROID_SDK_ROOT -name "d8" | head -1)
+        [ -z "$D8" ] && D8=$(find $ANDROID_SDK_ROOT -path "*/d8*" -name "d8" | head -1)
+        echo "d8: $D8"
+        
+        $D8 --output output/classes.dex $(find build/classes -name "*.class") 2>&1
+        
+        if [ -f "output/classes.dex" ]; then
+          echo "✅ classes.dex created!"
+          ls -la output/classes.dex
         else
-          echo "❌ APK tidak ditemukan"
-          find . -name "*.apk" 
+          echo "❌ d8 failed"
+          exit 1
         fi
         
-        # Bonus: extract .so juga
-        SO_FILE=$(find . -name "libMaino.so" | head -1)
-        if [ -n "$SO_FILE" ]; then
-          cp "$SO_FILE" output/
-          echo "✅ SO: $SO_FILE"
+        # --- STEP 3: BUILD .so (backup) ---
+        CPP_DIR=$(dirname $(find . -name "Main.cpp" | grep -v cpp/main.cpp | head -1))
+        cd "$CPP_DIR"
+        
+        CXX=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang++
+        
+        SOURCES=$(find . -maxdepth 2 \( -name "*.cpp" -o -name "*.c" \) | grep -v "Utils.cpp" | tr '\n' ' ')
+        INCS=$(find . -maxdepth 2 -type d | grep -v ".git" | sed 's/^/-I/' | tr '\n' ' ')
+        
+        $CXX -std=c++17 -shared -fPIC -fno-rtti -fno-exceptions -fpermissive -Wno-everything \
+          -o libMaino.so $SOURCES -llog -landroid $INCS
+        
+        cp libMaino.so ../../output/ 2>/dev/null || cp libMaino.so ../../../output/ 2>/dev/null || true
+        
+        # Copy STL as libGames.so
+        cp $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/libc++_shared.so ../../output/libGames.so 2>/dev/null || true
+        
+        echo "✅ .so files built!"
+      env:
+        ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
+    # ============================================================
+    # COLLECT OUTPUT
+    # ============================================================
+    - name: Collect All Output
+      run: |
+        mkdir -p output
+        
+        # If Gradle succeeded - extract from APK
+        if [ "${{ steps.gradle.outcome }}" = "success" ]; then
+          echo "=== Gradle succeeded - extracting from APK ==="
+          APK=$(find . -name "*.apk" | head -1)
+          if [ -n "$APK" ]; then
+            cp "$APK" output/PanDa-Mod.apk
+            # Extract classes.dex from APK
+            cd output
+            unzip -o PanDa-Mod.apk classes*.dex
+            cd ..
+            # Copy .so from APK build
+            find . -name "libMaino.so" -exec cp {} output/ \;
+            find . -name "libc++_shared.so" -exec cp {} output/libGames.so \;
+          fi
         fi
         
-        STL_FILE=$(find . -name "libc++_shared.so" | head -1)
-        if [ -n "$STL_FILE" ]; then
-          cp "$STL_FILE" output/libGames.so
-          echo "✅ STL: $STL_FILE"
-        fi
-        
+        # Verify output
+        echo "=== FINAL OUTPUT ==="
         ls -la output/
+        echo "=== FILE TYPES ==="
+        file output/* 2>/dev/null || echo "No files"
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: PanDa-Mod-APK
+        name: PanDa-Mod-Complete
         path: output/
         retention-days: 30
