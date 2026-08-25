@@ -1,6 +1,7 @@
 apply plugin: 'com.android.application'
 
 android {
+    namespace "uk.lgl"
     compileSdkVersion 30
     defaultConfig {
         applicationId "uk.lgl"
@@ -9,7 +10,7 @@ android {
         versionCode 1
         versionName "2.7"
         ndk {
-            abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86'
+            abiFilters 'armeabi-v7a'
         }
         signingConfig signingConfigs.debug
     }
@@ -30,7 +31,7 @@ android {
             path file('src/main/jni/Android.mk')
         }
     }
-    ndkVersion = '22.0.7026061'
+    ndkVersion = '25.2.9519653'
     dependencies {
         implementation fileTree(dir: 'libs', include: ['*.jar'])
     }
