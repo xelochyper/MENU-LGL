@@ -422,7 +422,7 @@ JNICALL
 Java_uk_lgl_modmenu_FloatingModMenuService_getFeatureList(JNIEnv *env, jobject context) {
     jobjectArray ret;
 
-    MakeToast(env, context, OBFUSCATE("Modded by XIEPANDA"), Toast::LENGTH_LONG);
+    MakeToast(env, context, OBFUSCATE("Modded by Maino Games"), Toast::LENGTH_LONG);
 
     const char *features[] = {
             OBFUSCATE("Category_EKONOMI"),
