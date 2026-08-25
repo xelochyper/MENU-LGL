@@ -2,36 +2,42 @@ apply plugin: 'com.android.application'
 
 android {
     compileSdkVersion 30
+    buildToolsVersion "30.0.3"
+
     defaultConfig {
-        applicationId "uk.lgl"
-        minSdkVersion 19
+        applicationId "com.android.support"  // atau com.xiepanda.modmenu
+        minSdkVersion 21
         targetSdkVersion 30
         versionCode 1
-        versionName "2.7"
+        versionName "1.0"
+        
         ndk {
-            abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86'
+            abiFilters 'armeabi-v7a'  // ARM32 ONLY
         }
-        signingConfig signingConfigs.debug
+        
+        externalNativeBuild {
+            cmake {
+                cppFlags '-std=c++17 -fno-rtti -fno-exceptions -fpermissive'
+                arguments '-DANDROID_STL=c++_shared'
+            }
+        }
     }
+    
+    externalNativeBuild {
+        cmake {
+            path "src/main/jni/CMakeLists.txt"
+            // atau path "src/main/cpp/CMakeLists.txt"
+        }
+    }
+
     buildTypes {
         release {
-            shrinkResources false
             minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-        }
-        debug {
-            shrinkResources false
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
-    externalNativeBuild {
-        ndkBuild {
-            path file('src/main/jni/Android.mk')
-        }
-    }
-    ndkVersion = '22.0.7026061'
-    dependencies {
-        implementation fileTree(dir: 'libs', include: ['*.jar'])
-    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.3.0'
 }
