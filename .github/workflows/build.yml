@@ -15,50 +15,131 @@ jobs:
 
     - name: Setup Android NDK
       uses: nttld/setup-ndk@v1
+      id: setup-ndk
       with:
         ndk-version: r26d
 
-    - name: Compile Native (ARM32 Direct NDK)
+    - name: Detect Project Structure
       run: |
-        # Cari folder cpp - otomatis deteksi struktur
+        echo "=== Struktur Repo ==="
+        find . -name "Main.cpp" -o -name "*.cpp" | head -30
+        find . -name "CMakeLists.txt" -o -name "Android.mk" | head -5
+        echo "=== DONE ==="
+
+    - name: Compile Native Library (ARM32)
+      run: |
+        # Auto-detect folder Main.cpp
         CPP_DIR=$(find . -name "Main.cpp" -exec dirname {} \; | head -1)
-        echo "Found CPP dir: $CPP_DIR"
-        cd $CPP_DIR
+        echo "CPP Directory: $CPP_DIR"
+        cd "$CPP_DIR"
         
-        # Compiler ARM32
+        # Compiler ARM32 (armeabi-v7a, API 21)
         CXX=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang++
         
-        # Compile semua source
+        # Kumpulkan semua source files otomatis
+        SOURCES=""
+        for f in Main.cpp \
+                 KittyMemory/KittyMemory.cpp \
+                 KittyMemory/MemoryPatch.cpp \
+                 KittyMemory/MemoryBackup.cpp \
+                 KittyMemory/KittyUtils.cpp \
+                 Substrate/SubstrateHook.cpp \
+                 Substrate/SubstrateDebug.cpp \
+                 Substrate/SubstratePosixMemory.cpp \
+                 Substrate/SymbolFinder.cpp \
+                 Substrate/hde64.c \
+                 And64InlineHook/And64InlineHook.cpp; do
+            if [ -f "$f" ]; then
+                SOURCES="$SOURCES $f"
+                echo "Adding: $f"
+            else
+                echo "SKIP (not found): $f"
+            fi
+        done
+        
+        # Auto-detect .cpp/.c tambahan yang terlewat
+        EXTRA=$(find . -name "*.cpp" -o -name "*.c" | \
+                grep -v -E "(Main.cpp|KittyMemory/|Substrate/|And64InlineHook/)" | tr '\n' ' ')
+        if [ ! -z "$EXTRA" ]; then
+            echo "Extra sources: $EXTRA"
+            SOURCES="$SOURCES $EXTRA"
+        fi
+        
+        echo "=== COMPILING ==="
+        echo "Sources: $SOURCES"
+        
         $CXX -std=c++17 \
           -shared -fPIC \
           -fvisibility=hidden \
           -Wno-error=format-security \
+          -Wno-error=c++11-narrowing \
           -fno-rtti -fno-exceptions -fpermissive \
+          -O2 -s \
           -o libPanDa.so \
-          Main.cpp \
-          KittyMemory/KittyMemory.cpp \
-          KittyMemory/MemoryPatch.cpp \
-          KittyMemory/MemoryBackup.cpp \
-          KittyMemory/KittyUtils.cpp \
-          Substrate/SubstrateHook.cpp \
-          Substrate/SubstrateDebug.cpp \
-          Substrate/SubstratePosixMemory.cpp \
-          Substrate/SymbolFinder.cpp \
-          Substrate/hde64.c \
-          And64InlineHook/And64InlineHook.cpp \
+          $SOURCES \
           -llog -landroid -lGLESv2 \
-          -I. -IIncludes -IKittyMemory -ISubstrate -IAnd64InlineHook -IMenu
+          -I. \
+          -IIncludes \
+          -IKittyMemory \
+          -ISubstrate \
+          -IAnd64InlineHook \
+          -IMenu \
+          -Ijni 2>/dev/null || true
+        
+        # Cek hasil
+        if [ -f "libPanDa.so" ]; then
+            echo "=== BUILD SUCCESS ==="
+            ls -la libPanDa.so
+            file libPanDa.so
+        else
+            echo "=== RETRY tanpa include jni ==="
+            $CXX -std=c++17 \
+              -shared -fPIC \
+              -fvisibility=hidden \
+              -Wno-error=format-security \
+              -Wno-error=c++11-narrowing \
+              -fno-rtti -fno-exceptions -fpermissive \
+              -O2 -s \
+              -o libPanDa.so \
+              $SOURCES \
+              -llog -landroid -lGLESv2 \
+              -I. \
+              -IIncludes \
+              -IKittyMemory \
+              -ISubstrate \
+              -IAnd64InlineHook \
+              -IMenu
+            
+            ls -la libPanDa.so
+            file libPanDa.so
+        fi
 
-    - name: Copy STL & Prepare Output
+    - name: Prepare Output (libPanDa.so + libGamEs.so)
       run: |
         mkdir -p output/
         CPP_DIR=$(find . -name "Main.cpp" -exec dirname {} \; | head -1)
-        cp $CPP_DIR/libPanDa.so output/
-        cp $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/libc++_shared.so output/
         
-        echo "=== BUILD SUCCESS ==="
-        ls -la output/
+        # Copy library utama
+        cp "$CPP_DIR/libPanDa.so" output/
+        
+        # Copy & RENAME STL → libGamEs.so
+        cp $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/libc++_shared.so output/libGamEs.so
+        
+        # Verifikasi arsitektur ARM32
+        echo "=== VERIFIKASI ==="
         file output/libPanDa.so
+        file output/libGamEs.so
+        
+        # Cek harus ARM EABI (32-bit)
+        if file output/libPanDa.so | grep -q "ARM"; then
+            echo "✅ ARM32 CONFIRMED"
+        else
+            echo "❌ WRONG ARCHITECTURE!"
+            exit 1
+        fi
+        
+        echo "=== FILES ==="
+        ls -la output/
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
