@@ -3,48 +3,66 @@ name: Build PanDa Mod
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:  # Bisa trigger manual juga
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-
-    - name: Setup Java
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
 
     - name: Setup Android NDK
       uses: nttld/setup-ndk@v1
       with:
         ndk-version: r26d
 
-    - name: Grant Permission
-      run: chmod +x gradlew
-
-    - name: Build APK (ARM32 Only)
+    - name: Compile Native (ARM32 Direct NDK)
       run: |
-        ./gradlew assembleRelease \
-          -Pandroid.injected.build.abi=armeabi-v7a \
-          -Dorg.gradle.jvmargs="-Xmx2048m"
-      env:
-        ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        # Cari folder cpp - otomatis deteksi struktur
+        CPP_DIR=$(find . -name "Main.cpp" -exec dirname {} \; | head -1)
+        echo "Found CPP dir: $CPP_DIR"
+        cd $CPP_DIR
+        
+        # Compiler ARM32
+        CXX=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang++
+        
+        # Compile semua source
+        $CXX -std=c++17 \
+          -shared -fPIC \
+          -fvisibility=hidden \
+          -Wno-error=format-security \
+          -fno-rtti -fno-exceptions -fpermissive \
+          -o libPanDa.so \
+          Main.cpp \
+          KittyMemory/KittyMemory.cpp \
+          KittyMemory/MemoryPatch.cpp \
+          KittyMemory/MemoryBackup.cpp \
+          KittyMemory/KittyUtils.cpp \
+          Substrate/SubstrateHook.cpp \
+          Substrate/SubstrateDebug.cpp \
+          Substrate/SubstratePosixMemory.cpp \
+          Substrate/SymbolFinder.cpp \
+          Substrate/hde64.c \
+          And64InlineHook/And64InlineHook.cpp \
+          -llog -landroid -lGLESv2 \
+          -I. -IIncludes -IKittyMemory -ISubstrate -IAnd64InlineHook -IMenu
 
-    - name: Extract .so Files
+    - name: Copy STL & Prepare Output
       run: |
         mkdir -p output/
-        find . -name "libPanDa.so" -exec cp {} output/ \;
-        find . -name "libc++_shared.so" -exec cp {} output/ \;
-        cp app/build/outputs/apk/release/*.apk output/ 2>/dev/null || true
+        CPP_DIR=$(find . -name "Main.cpp" -exec dirname {} \; | head -1)
+        cp $CPP_DIR/libPanDa.so output/
+        cp $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/libc++_shared.so output/
+        
+        echo "=== BUILD SUCCESS ==="
+        ls -la output/
+        file output/libPanDa.so
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: PanDa-Mod-Build
+        name: PanDa-Mod-ARM32
         path: output/
         retention-days: 30
