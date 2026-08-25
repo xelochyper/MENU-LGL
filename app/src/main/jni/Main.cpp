@@ -28,6 +28,7 @@ struct My_Patches {
     MemoryPatch FreeMP;
     MemoryPatch AntiReport;
     MemoryPatch BensinGratis;
+    MemoryPatch ModMode;
 } hexPatches;
 
 bool bUangX100 = false;
@@ -35,6 +36,10 @@ bool bServerAddRp = false;
 bool bStaminaUnlimited = false;
 bool bLemparBus = false;
 bool bInstantWin = false;
+bool bAntiKick = false;
+bool bBanLem = false;
+bool bAntiRoll = false;
+bool bRemInstan = false;
 
 struct Vec3 { float x, y, z; };
 
@@ -74,6 +79,30 @@ void FinishRace(void *inst, void *player, float time) {
     old_FinishRace(inst, player, time);
 }
 
+void (*old_OnKickPlayer)(void *inst, void *evt);
+void OnKickPlayer(void *inst, void *evt) {
+    if (bAntiKick) return;
+    old_OnKickPlayer(inst, evt);
+}
+
+float (*old_getFriction)(void *inst);
+float getFriction(void *inst) {
+    if (bBanLem) return 0.9f;
+    return old_getFriction(inst);
+}
+
+float (*old_getAntiRoll)(void *inst);
+float getAntiRoll(void *inst) {
+    if (bAntiRoll) return 1.0f;
+    return old_getAntiRoll(inst);
+}
+
+float (*old_getBrake)(void *inst);
+float getBrake(void *inst) {
+    if (bRemInstan) return 50000.0f;
+    return old_getBrake(inst);
+}
+
 void *hack_thread(void *) {
     LOGI(OBFUSCATE("XiePanDa Mod Loading..."));
 
@@ -104,6 +133,10 @@ void *hack_thread(void *) {
         string2Offset(OBFUSCATE_KEY("0x2283F1C", 'e')),
         OBFUSCATE("00 00 A0 E3 1E FF 2F E1"));
 
+    hexPatches.ModMode = MemoryPatch::createWithHex(targetLibName,
+        string2Offset(OBFUSCATE_KEY("0x2373890", 'f')),
+        OBFUSCATE("01 00 A0 E3 1E FF 2F E1"));
+
     MSHookFunction((void *) getAbsoluteAddress(targetLibName, 0x21C8204),
                    (void *) AddCache, (void **) &old_AddCache);
 
@@ -119,6 +152,18 @@ void *hack_thread(void *) {
     MSHookFunction((void *) getAbsoluteAddress(targetLibName, 0x2204738),
                    (void *) FinishRace, (void **) &old_FinishRace);
 
+    MSHookFunction((void *) getAbsoluteAddress(targetLibName, 0x222AD0C),
+                   (void *) OnKickPlayer, (void **) &old_OnKickPlayer);
+
+    MSHookFunction((void *) getAbsoluteAddress(targetLibName, 0x2174D3C),
+                   (void *) getFriction, (void **) &old_getFriction);
+
+    MSHookFunction((void *) getAbsoluteAddress(targetLibName, 0x2174DA4),
+                   (void *) getAntiRoll, (void **) &old_getAntiRoll);
+
+    MSHookFunction((void *) getAbsoluteAddress(targetLibName, 0x217506C),
+                   (void *) getBrake, (void **) &old_getBrake);
+
     LOGI(OBFUSCATE("All hooks installed!"));
 #endif
 
@@ -132,10 +177,10 @@ JNICALL
 Java_uk_lgl_modmenu_FloatingModMenuService_getFeatureList(JNIEnv *env, jobject context) {
     jobjectArray ret;
 
-    MakeToast(env, context, OBFUSCATE("Maino Games - GOD Edition"), Toast::LENGTH_LONG);
+    MakeToast(env, context, OBFUSCATE("Mod by Maino Games"), Toast::LENGTH_LONG);
 
     const char *features[] = {
-        OBFUSCATE("Category_XIEPANDA MOD - 10 FITUR UTAMA"),
+        OBFUSCATE("Category_XIEPANDA MOD - 15 FITUR UTAMA"),
         OBFUSCATE("Toggle_Uang x100 Masuk"),
         OBFUSCATE("Toggle_SERVER +1 MILIAR"),
         OBFUSCATE("Toggle_Unlock All Bus"),
@@ -146,6 +191,11 @@ Java_uk_lgl_modmenu_FloatingModMenuService_getFeatureList(JNIEnv *env, jobject c
         OBFUSCATE("Toggle_Stamina Unlimited"),
         OBFUSCATE("Toggle_Lempar Bus ke Langit"),
         OBFUSCATE("Toggle_Instant Win Race"),
+        OBFUSCATE("Toggle_Anti Kick"),
+        OBFUSCATE("Toggle_Mod Mode Rahasia"),
+        OBFUSCATE("Toggle_Ban Anti-Slip"),
+        OBFUSCATE("Toggle_Anti Terbalik"),
+        OBFUSCATE("Toggle_Rem Instan"),
     };
 
     int Total_Feature = (sizeof features / sizeof features[0]);
@@ -184,39 +234,24 @@ Java_uk_lgl_modmenu_Preferences_Changes(JNIEnv *env, jclass clazz, jobject obj,
             bServerAddRp = boolean;
             break;
         case 2:
-            if (boolean) {
-                hexPatches.UnlockAllBus.Modify();
-            } else {
-                hexPatches.UnlockAllBus.Restore();
-            }
+            if (boolean) hexPatches.UnlockAllBus.Modify();
+            else hexPatches.UnlockAllBus.Restore();
             break;
         case 3:
-            if (boolean) {
-                hexPatches.GodMode.Modify();
-            } else {
-                hexPatches.GodMode.Restore();
-            }
+            if (boolean) hexPatches.GodMode.Modify();
+            else hexPatches.GodMode.Restore();
             break;
         case 4:
-            if (boolean) {
-                hexPatches.FreeMP.Modify();
-            } else {
-                hexPatches.FreeMP.Restore();
-            }
+            if (boolean) hexPatches.FreeMP.Modify();
+            else hexPatches.FreeMP.Restore();
             break;
         case 5:
-            if (boolean) {
-                hexPatches.AntiReport.Modify();
-            } else {
-                hexPatches.AntiReport.Restore();
-            }
+            if (boolean) hexPatches.AntiReport.Modify();
+            else hexPatches.AntiReport.Restore();
             break;
         case 6:
-            if (boolean) {
-                hexPatches.BensinGratis.Modify();
-            } else {
-                hexPatches.BensinGratis.Restore();
-            }
+            if (boolean) hexPatches.BensinGratis.Modify();
+            else hexPatches.BensinGratis.Restore();
             break;
         case 7:
             bStaminaUnlimited = boolean;
@@ -226,6 +261,22 @@ Java_uk_lgl_modmenu_Preferences_Changes(JNIEnv *env, jclass clazz, jobject obj,
             break;
         case 9:
             bInstantWin = boolean;
+            break;
+        case 10:
+            bAntiKick = boolean;
+            break;
+        case 11:
+            if (boolean) hexPatches.ModMode.Modify();
+            else hexPatches.ModMode.Restore();
+            break;
+        case 12:
+            bBanLem = boolean;
+            break;
+        case 13:
+            bAntiRoll = boolean;
+            break;
+        case 14:
+            bRemInstan = boolean;
             break;
     }
 }
