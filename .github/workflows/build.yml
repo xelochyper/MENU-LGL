@@ -21,33 +21,27 @@ jobs:
 
     - name: Build Native Library
       run: |
-        echo "========== STRUKTUR =========="
-        find . -name "*.cpp" -o -name "*.c" | grep -v ".git" | sort
-        
-        # Cari folder Main.cpp
-        CPP_DIR=$(dirname $(find . -name "Main.cpp" | head -1))
+        CPP_DIR=$(dirname $(find . -name "Main.cpp" | grep -v cpp/main.cpp | head -1))
         [ -z "$CPP_DIR" ] && CPP_DIR="."
         echo "Folder: $CPP_DIR"
         cd "$CPP_DIR"
         
         CXX=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang++
         
-        # AUTO-DETECT semua file source
+        # Kumpulkan sources — TANPA Utils.cpp (butuh xDL yang tidak ada)
         SOURCES=""
-        for f in $(find . -maxdepth 2 \( -name "*.cpp" -o -name "*.c" \) | sort); do
+        for f in $(find . -maxdepth 2 \( -name "*.cpp" -o -name "*.c" \) | grep -v ".git" | grep -v "Utils.cpp" | sort); do
           SOURCES="$SOURCES $f"
-          echo "+ $f"
         done
+        echo "Sources: $SOURCES"
         
-        # AUTO-DETECT semua include dirs
+        # Includes
         INCS=""
         for d in $(find . -maxdepth 2 -type d | grep -v ".git" | sort); do
           INCS="$INCS -I$d"
         done
         
         echo "========== COMPILE =========="
-        echo "Sources: $SOURCES"
-        
         $CXX -std=c++17 \
           -shared -fPIC \
           -fno-rtti -fno-exceptions -fpermissive \
@@ -55,15 +49,14 @@ jobs:
           -o libPanDa.so \
           $SOURCES \
           -llog -landroid \
-          $INCS 2>&1 | tail -30
+          $INCS 2>&1
         
-        # Cek hasil
         if [ ! -f "libPanDa.so" ]; then
-          echo "❌ GAGAL - libPanDa.so tidak dibuat"
+          echo "❌ GAGAL"
           exit 1
         fi
         
-        echo "========== SUCCESS =========="
+        echo "✅ SUCCESS"
         ls -la libPanDa.so
         file libPanDa.so
 
