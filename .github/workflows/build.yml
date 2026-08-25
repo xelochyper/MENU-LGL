@@ -31,19 +31,36 @@ jobs:
       with:
         ndk-version: r25b
 
+    - name: FIX: Remove SDK packages with 'x' version (34x/35x/36x crash)
+      run: |
+        echo "=== BEFORE ==="
+        ls $ANDROID_SDK_ROOT/platforms/ 2>/dev/null
+        ls $ANDROID_SDK_ROOT/build-tools/ 2>/dev/null
+        
+        # Remove ALL SDK packages with 'x' in version
+        grep -rl 'version="[0-9]*x' $ANDROID_SDK_ROOT --include="package.xml" 2>/dev/null | while read f; do
+          echo "Removing: $(dirname "$f")"
+          rm -rf "$(dirname "$f")"
+        done
+        
+        echo "=== AFTER ==="
+        ls $ANDROID_SDK_ROOT/platforms/ 2>/dev/null
+        ls $ANDROID_SDK_ROOT/build-tools/ 2>/dev/null
+        echo "✅ Problematic SDK packages removed"
+
     - name: Download Gradle
       run: |
         wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
         unzip -q gradle-8.5-bin.zip
         echo "✅ Gradle ready"
 
-    - name: Generate/Fix Build Files
+    - name: Generate Build Files
       run: |
-        echo "=== Checking files ==="
+        echo "=== Checking existing files ==="
         ls -la
         find . -name "*.java" | grep -v ".git" | head -10
-        find . -name "build.gradle" | grep -v ".git"
-        find . -name "Android.mk" | grep -v ".git"
+        find . -name "Main.cpp" | grep -v ".git"
+        find . -name "AndroidManifest.xml" | grep -v ".git"
 
         # settings.gradle
         if [ ! -f "settings.gradle" ]; then
@@ -52,16 +69,15 @@ jobs:
           echo "✅ Generated settings.gradle"
         fi
 
-        # build.gradle (root)
-        if [ ! -f "build.gradle" ]; then
-          cat > build.gradle << 'GRADLE'
+        # build.gradle (root) — AGP 8.2.0
+        cat > build.gradle << 'GRADLE'
         buildscript {
             repositories {
                 google()
                 mavenCentral()
             }
             dependencies {
-                classpath 'com.android.tools.build:gradle:8.1.0'
+                classpath 'com.android.tools.build:gradle:8.2.0'
             }
         }
         allprojects {
@@ -71,30 +87,27 @@ jobs:
             }
         }
         GRADLE
-          echo "✅ Generated build.gradle"
-        fi
+        echo "✅ Generated build.gradle (AGP 8.2.0)"
 
         # gradle.properties
-        if [ ! -f "gradle.properties" ]; then
-          cat > gradle.properties << 'PROP'
+        cat > gradle.properties << 'PROP'
         android.useAndroidX=true
         android.enableJetifier=true
         org.gradle.jvmargs=-Xmx2048m
         PROP
-          echo "✅ Generated gradle.properties"
-        fi
+        echo "✅ Generated gradle.properties"
 
-        # local.properties
+        # local.properties — NO ndk.dir!
         echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
-        echo "ndk.dir=$ANDROID_NDK_HOME" >> local.properties
-        echo "✅ Generated local.properties"
+        echo "✅ Generated local.properties (no ndk.dir)"
 
-        # app/build.gradle — PAKAI ndkBuild BUKAN cmake!
+        # app/build.gradle — ndkBuild + ndkVersion
         cat > app/build.gradle << 'GRADLE'
         apply plugin: 'com.android.application'
         android {
             compileSdkVersion 30
             buildToolsVersion "30.0.3"
+            ndkVersion "25.2.9519653"
             defaultConfig {
                 applicationId "com.android.support"
                 minSdkVersion 21
@@ -162,7 +175,7 @@ jobs:
         APP_ABI := armeabi-v7a
         APP_STL := c++_shared
         MK
-        echo "✅ Generated Application.mk (ARM32 only)"
+        echo "✅ Generated Application.mk"
 
         echo "=== ALL FILES READY ==="
 
@@ -179,20 +192,16 @@ jobs:
       run: |
         mkdir -p output
 
-        # Find APK
         APK=$(find . -name "*.apk" | head -1)
         if [ -n "$APK" ]; then
           cp "$APK" output/PanDa-Mod.apk
           echo "✅ APK: $APK"
-
-          # Extract classes.dex
           cd output
           unzip -o PanDa-Mod.apk classes*.dex
           echo "✅ classes.dex extracted"
           cd ..
         fi
 
-        # Copy .so
         find . -name "libMaino.so" -exec cp {} output/ \;
         find . -name "libc++_shared.so" -exec cp {} output/libGames.so \;
 
