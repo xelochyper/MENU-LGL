@@ -5,7 +5,7 @@ include $(CLEAR_VARS)
 # Here is the name of your lib.
 # When you change the lib name, change also on System.loadLibrary("") under OnCreate method on StaticActivity.java
 # Both must have same name
-LOCAL_MODULE    := Maino
+LOCAL_MODULE    := MyLibName
 
 # Code optimization
 # -std=c++17 is required to support AIDE app with NDK
