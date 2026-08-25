@@ -1,4 +1,4 @@
-name: Build PanDa Mod
+name: Build PanDa Mod APK
 
 on:
   push:
@@ -10,72 +10,97 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout
+    - name: Checkout Code
       uses: actions/checkout@v4
 
-    - name: Setup NDK
+    - name: Setup Java 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+      with:
+        sdk-platform: 'android-30'
+        sdk-build-tools: '30.0.3'
+
+    - name: Setup Android NDK
       uses: nttld/setup-ndk@v1
       id: ndk
       with:
         ndk-version: r26d
 
-    - name: Build Native Library
+    - name: Grant Permission
+      run: chmod +x ./gradlew
+
+    - name: Debug - Show Structure
       run: |
-        CPP_DIR=$(dirname $(find . -name "Main.cpp" | grep -v cpp/main.cpp | head -1))
-        [ -z "$CPP_DIR" ] && CPP_DIR="."
-        echo "Folder: $CPP_DIR"
-        cd "$CPP_DIR"
-        
-        CXX=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang++
-        
-        # Sources — TANPA Utils.cpp (xDL tidak ada)
-        SOURCES=""
-        for f in $(find . -maxdepth 2 \( -name "*.cpp" -o -name "*.c" \) | grep -v ".git" | grep -v "Utils.cpp" | sort); do
-          SOURCES="$SOURCES $f"
-        done
-        echo "Sources: $SOURCES"
-        
-        INCS=""
-        for d in $(find . -maxdepth 2 -type d | grep -v ".git" | sort); do
-          INCS="$INCS -I$d"
-        done
-        
-        echo "========== COMPILE =========="
-        $CXX -std=c++17 \
-          -shared -fPIC \
-          -fno-rtti -fno-exceptions -fpermissive \
-          -Wno-everything \
-          -o libMaino.so \
-          $SOURCES \
-          -llog -landroid \
-          $INCS 2>&1
-        
-        if [ ! -f "libMaino.so" ]; then
-          echo "❌ GAGAL"
-          exit 1
-        fi
-        
-        echo "✅ SUCCESS"
-        ls -la libMaino.so
-        file libMaino.so
+        echo "=== ROOT ==="
+        ls -la
+        echo "=== SETTINGS.GRADLE ==="
+        cat settings.gradle 2>/dev/null || echo "tidak ada"
+        echo "=== BUILD.GRADLE (root) ==="
+        cat build.gradle 2>/dev/null || echo "tidak ada"
+        echo "=== BUILD.GRADLE (app) ==="
+        cat app/build.gradle 2>/dev/null || echo "tidak ada"
+        echo "=== MANIFEST ==="
+        find . -name "AndroidManifest.xml" | head -5
+        echo "=== JAVA FILES ==="
+        find . -name "*.java" | head -20
+        echo "=== CPP FILES ==="
+        find . -name "*.cpp" -o -name "*.c" | head -20
+        echo "=== ANDROID.MK ==="
+        find . -name "Android.mk" | head -3
+        echo "=== CMAKELISTS ==="
+        find . -name "CMakeLists.txt" | head -3
+
+    - name: Build APK (assembleRelease)
+      run: |
+        ./gradlew assembleRelease \
+          -Pandroid.injected.build.abi=armeabi-v7a \
+          -Dorg.gradle.jvmargs="-Xmx2048m" \
+          --stacktrace
+      env:
+        ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     - name: Prepare Output
       run: |
         mkdir -p output/
-        CPP_DIR=$(dirname $(find . -name "Main.cpp" | grep -v cpp/main.cpp | head -1))
-        [ -z "$CPP_DIR" ] && CPP_DIR="."
         
-        cp "$CPP_DIR/libMaino.so" output/
-        cp $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/libc++_shared.so output/libGames.so
+        # Cari APK hasil build
+        APK_FILE=$(find . -name "*.apk" -path "*/release/*" | head -1)
+        if [ -z "$APK_FILE" ]; then
+          APK_FILE=$(find . -name "*.apk" | grep -v "unsigned" | head -1)
+        fi
         
-        echo "=== VERIFIKASI ==="
-        file output/libMaino.so
-        file output/libGames.so
+        if [ -n "$APK_FILE" ]; then
+          cp "$APK_FILE" output/PanDa-Mod.apk
+          echo "✅ APK: $APK_FILE"
+        else
+          echo "❌ APK tidak ditemukan"
+          find . -name "*.apk" 
+        fi
+        
+        # Bonus: extract .so juga
+        SO_FILE=$(find . -name "libMaino.so" | head -1)
+        if [ -n "$SO_FILE" ]; then
+          cp "$SO_FILE" output/
+          echo "✅ SO: $SO_FILE"
+        fi
+        
+        STL_FILE=$(find . -name "libc++_shared.so" | head -1)
+        if [ -n "$STL_FILE" ]; then
+          cp "$STL_FILE" output/libGames.so
+          echo "✅ STL: $STL_FILE"
+        fi
+        
         ls -la output/
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: Maino-Mod
+        name: PanDa-Mod-APK
         path: output/
         retention-days: 30
