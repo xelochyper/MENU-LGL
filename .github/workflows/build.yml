@@ -1,4 +1,4 @@
-name: Build PanDa Mod (Debug)
+name: Build PanDa Mod
 
 on:
   push:
@@ -10,124 +10,71 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Code
+    - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Setup Android NDK
+    - name: Setup NDK
       uses: nttld/setup-ndk@v1
-      id: setup-ndk
+      id: ndk
       with:
         ndk-version: r26d
 
-    - name: DEBUG - Show Full Structure
+    - name: Build
       run: |
-        echo "========== ROOT =========="
-        ls -la
-        echo "========== SEMUA FOLDER =========="
-        find . -type d | grep -v ".git" | sort
-        echo "========== SEMUA FILE CPP/H =========="
-        find . \( -name "*.cpp" -o -name "*.c" -o -name "*.h" \) | grep -v ".git" | sort
-        echo "========== CARI Main.cpp =========="
-        find . -iname "main.cpp" -o -iname "Main.cpp"
-        echo "========== STRUKTURE SELESAI =========="
-
-    - name: Compile Native Library (ARM32)
-      run: |
-        set -e
-        
+        # Find cpp directory
         CPP_DIR=$(find . -name "Main.cpp" -exec dirname {} \; | head -1)
         
-        # FALLBACK: kalau Main.cpp tidak ada, cari main.cpp
         if [ -z "$CPP_DIR" ]; then
-          CPP_DIR=$(find . -name "main.cpp" -exec dirname {} \; | head -1)
+          CPP_DIR=$(find . -type d \( -name "cpp" -o -name "jni" \) -not -path "*/.git/*" | head -1)
         fi
         
-        # FALLBACK 2: pakai folder cpp/jni apapun yang ada
-        if [ -z "$CPP_DIR" ]; then
-          CPP_DIR=$(find . -type d \( -name "cpp" -o -name "jni" \) | grep -v ".git" | head -1)
-        fi
-        
-        if [ -z "$CPP_DIR" ]; then
-          echo "❌ ERROR: Tidak menemukan folder source C++!"
-          echo "Cek log 'DEBUG - Show Full Structure' di atas"
-          exit 1
-        fi
-        
-        echo "✅ Menggunakan folder: $CPP_DIR"
+        echo "Building in: $CPP_DIR"
         cd "$CPP_DIR"
-        echo "=== ISI FOLDER ==="
         ls -la
         
         CXX=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang++
         
-        echo "=== COMPILER CHECK ==="
-        $CXX --version | head -1
-        
-        # Build source list
+        # Collect sources
         SOURCES=""
         for f in $(find . -maxdepth 2 \( -name "*.cpp" -o -name "*.c" \) | sort); do
           SOURCES="$SOURCES $f"
-          echo "Include: $f"
         done
+        echo "Sources: $SOURCES"
         
-        if [ -z "$SOURCES" ]; then
-          echo "❌ ERROR: Tidak ada file .cpp/.c!"
-          exit 1
-        fi
-        
-        echo "=== INCLUDE DIRS ==="
+        # Collect includes
         INCS=""
-        for d in . Includes KittyMemory Substrate And64InlineHook Menu jni; do
-          if [ -d "$d" ]; then
-            INCS="$INCS -I$d"
-            echo "Include dir: $d"
-          fi
+        for d in . Includes KittyMemory Substrate And64InlineHook Menu; do
+          [ -d "$d" ] && INCS="$INCS -I$d"
         done
         
-        echo "=== MULAI COMPILE ==="
-        set +e
+        # COMPILE
         $CXX -std=c++17 \
           -shared -fPIC \
-          -fvisibility=hidden \
-          -Wno-error=format-security \
-          -Wno-error=c++11-narrowing \
-          -fno-rtti -fno-exceptions -fpermissive \
-          -O2 \
+          -fno-rtti -fno-exceptions \
+          -Wno-everything \
           -o libPanDa.so \
           $SOURCES \
-          -llog -landroid -lGLESv2 \
-          $INCS 2>&1 | tee compile_log.txt
-        COMPILE_EXIT=$?
-        set -e
+          -llog -landroid \
+          $INCS
         
-        if [ $COMPILE_EXIT -ne 0 ] || [ ! -f "libPanDa.so" ]; then
-          echo "❌ COMPILE GAGAL!"
-          echo "=== 50 BARIS ERROR TERAKHIR ==="
-          tail -50 compile_log.txt
-          exit 1
-        fi
-        
-        echo "=== BUILD SUCCESS ==="
+        # Verify
         ls -la libPanDa.so
         file libPanDa.so
 
-    - name: Prepare Output
+    - name: Output
       run: |
         mkdir -p output/
         CPP_DIR=$(find . -name "Main.cpp" -exec dirname {} \; | head -1)
-        [ -z "$CPP_DIR" ] && CPP_DIR=$(find . -name "main.cpp" -exec dirname {} \; | head -1)
+        [ -z "$CPP_DIR" ] && CPP_DIR=$(find . -type d \( -name "cpp" -o -name "jni" \) -not -path "*/.git/*" | head -1)
         
         cp "$CPP_DIR/libPanDa.so" output/
         cp $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/libc++_shared.so output/libGamEs.so
         
-        echo "=== VERIFIKASI ARM32 ==="
-        file output/libPanDa.so
-        file output/libGamEs.so
-        ls -la output/
+        file output/*
 
-    - name: Upload Artifact
+    - name: Upload
       uses: actions/upload-artifact@v4
       with:
-        name: PanDa-Mod-ARM32
+        name: PanDa-Mod
         path: output/
         retention-days: 30
