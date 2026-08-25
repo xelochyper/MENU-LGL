@@ -1,4 +1,4 @@
-name: Build PanDa (NDK Direct - No Gradle)
+name: Build PanDa (Manual - No Gradle)
 
 on:
   push:
@@ -13,51 +13,160 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
+    - name: Setup Java 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+      with:
+        sdk-platform: 'android-30'
+        sdk-build-tools: '33.0.2'
+
     - name: Setup NDK
       uses: nttld/setup-ndk@v1
       id: ndk
       with:
         ndk-version: r26d
 
+    - name: Show Structure
+      run: |
+        echo "=== JAVA FILES ==="
+        find . -name "*.java" | grep -v ".git" | sort
+        echo "=== CPP FILES ==="
+        find . -name "*.cpp" -o -name "*.c" | grep -v ".git" | sort
+        echo "=== SDK PATHS ==="
+        echo "SDK: $ANDROID_SDK_ROOT"
+        echo "NDK: $ANDROID_NDK_HOME"
+        find $ANDROID_SDK_ROOT -name "android.jar" | head -3
+        find $ANDROID_SDK_ROOT -name "d8" | head -3
+
+    # ============================================================
+    # STEP 1: COMPILE JAVA → classes.dex
+    # ============================================================
+    - name: Build classes.dex
+      run: |
+        mkdir -p build/classes output
+        
+        ANDROID_JAR=$(find $ANDROID_SDK_ROOT -name "android.jar" | head -1)
+        echo "Using android.jar: $ANDROID_JAR"
+        
+        # Find all Java files
+        JAVA_FILES=$(find . -name "*.java" | grep -v ".git")
+        COUNT=$(echo "$JAVA_FILES" | wc -w)
+        echo "Found $COUNT Java files"
+        
+        if [ -z "$JAVA_FILES" ]; then
+          echo "❌ No Java files found!"
+          exit 1
+        fi
+        
+        # Compile Java
+        echo "=== Compiling Java... ==="
+        javac -d build/classes -cp "$ANDROID_JAR" $JAVA_FILES 2>&1
+        
+        CLASS_COUNT=$(find build/classes -name "*.class" | wc -l)
+        echo "✅ Compiled: $CLASS_COUNT .class files"
+        
+        if [ "$CLASS_COUNT" -eq 0 ]; then
+          echo "❌ javac failed!"
+          find build/classes -name "*.class"
+          exit 1
+        fi
+        
+        # Convert to DEX
+        D8=$(find $ANDROID_SDK_ROOT -name "d8" | head -1)
+        echo "Using d8: $D8"
+        
+        echo "=== Converting to DEX... ==="
+        $D8 --output output/classes.dex $(find build/classes -name "*.class") 2>&1
+        
+        if [ -f "output/classes.dex" ]; then
+          echo "✅ classes.dex created!"
+          ls -la output/classes.dex
+        else
+          echo "❌ d8 failed!"
+          exit 1
+        fi
+
+    # ============================================================
+    # STEP 2: COMPILE C++ → libMaino.so
+    # ============================================================
     - name: Build libMaino.so (ARM32)
       run: |
         CPP_DIR=$(dirname $(find . -name "Main.cpp" | grep -v cpp/main.cpp | head -1))
         [ -z "$CPP_DIR" ] && CPP_DIR=$(dirname $(find . -name "Main.cpp" | head -1))
-        echo "Folder: $CPP_DIR"
+        echo "CPP dir: $CPP_DIR"
         cd "$CPP_DIR"
         
         CXX=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang++
         
+        # Sources (skip Utils.cpp - needs xDL)
         SOURCES=""
         for f in $(find . -maxdepth 2 \( -name "*.cpp" -o -name "*.c" \) | grep -v ".git" | grep -v "Utils.cpp" | sort); do
           SOURCES="$SOURCES $f"
         done
+        echo "Sources: $SOURCES"
         
+        # Include dirs
         INCS=""
         for d in $(find . -maxdepth 2 -type d | grep -v ".git" | sort); do
           INCS="$INCS -I$d"
         done
         
-        $CXX -std=c++17 -shared -fPIC -fno-rtti -fno-exceptions -fpermissive -Wno-everything \
-          -o libMaino.so $SOURCES -llog -landroid $INCS 2>&1
+        echo "=== Compiling C++... ==="
+        $CXX -std=c++17 \
+          -shared -fPIC \
+          -fno-rtti -fno-exceptions -fpermissive \
+          -Wno-everything \
+          -o libMaino.so \
+          $SOURCES \
+          -llog -landroid \
+          $INCS 2>&1
         
+        if [ ! -f "libMaino.so" ]; then
+          echo "❌ C++ compile failed!"
+          exit 1
+        fi
+        
+        echo "✅ libMaino.so created!"
         ls -la libMaino.so
         file libMaino.so
+        
+        # Copy to output
+        cp libMaino.so ../../output/ 2>/dev/null || cp libMaino.so ../../../output/ 2>/dev/null || true
+        
+        # Copy STL as libGames.so
+        STL=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/libc++_shared.so
+        cp $STL ../../output/libGames.so 2>/dev/null || cp $STL ../../../output/libGames.so 2>/dev/null || true
 
-    - name: Prepare Output
+    # ============================================================
+    # STEP 3: VERIFY & UPLOAD
+    # ============================================================
+    - name: Verify Output
       run: |
-        mkdir -p output
-        CPP_DIR=$(dirname $(find . -name "Main.cpp" | grep -v cpp/main.cpp | head -1))
-        [ -z "$CPP_DIR" ] && CPP_DIR=$(dirname $(find . -name "Main.cpp" | head -1))
-        
-        cp "$CPP_DIR/libMaino.so" output/
-        cp $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/arm-linux-androideabi/libc++_shared.so output/libGames.so
-        
+        echo "=== FINAL OUTPUT ==="
+        ls -la output/
+        echo "=== FILE TYPES ==="
         file output/*
+        
+        # Check all 3 files exist
+        OK=true
+        [ ! -f "output/classes.dex" ] && echo "❌ classes.dex MISSING" && OK=false
+        [ ! -f "output/libMaino.so" ] && echo "❌ libMaino.so MISSING" && OK=false
+        [ ! -f "output/libGames.so" ] && echo "❌ libGames.so MISSING" && OK=false
+        
+        if [ "$OK" = true ]; then
+          echo "✅✅✅ ALL FILES READY! ✅✅✅"
+        else
+          exit 1
+        fi
 
-    - name: Upload
+    - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: PanDa-Mod
+        name: PanDa-Mod-Complete
         path: output/
         retention-days: 30
