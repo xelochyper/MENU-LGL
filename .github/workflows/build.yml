@@ -31,43 +31,49 @@ jobs:
       with:
         ndk-version: r25b
 
-    - name: Remove problematic SDK packages
+    - name: Clean SDK (remove ALL except android-30)
       run: |
-        grep -rl 'version="[0-9]*x' $ANDROID_SDK_ROOT --include="package.xml" 2>/dev/null | while read f; do
-          rm -rf "$(dirname "$f")"
+        echo "=== BEFORE ==="
+        ls $ANDROID_SDK_ROOT/platforms/ 2>/dev/null
+        ls $ANDROID_SDK_ROOT/build-tools/ 2>/dev/null
+        
+        for dir in $ANDROID_SDK_ROOT/platforms/*/; do
+          dirname=$(basename "$dir")
+          if [ "$dirname" != "android-30" ]; then
+            rm -rf "$dir"
+          fi
         done
-        echo "Done"
+        
+        for dir in $ANDROID_SDK_ROOT/build-tools/*/; do
+          dirname=$(basename "$dir")
+          if [ "$dirname" != "30.0.3" ]; then
+            rm -rf "$dir"
+          fi
+        done
+        
+        echo "=== AFTER ==="
+        ls $ANDROID_SDK_ROOT/platforms/ 2>/dev/null
+        ls $ANDROID_SDK_ROOT/build-tools/ 2>/dev/null
 
     - name: Download Gradle
       run: |
         wget -q https://services.gradle.org/distributions/gradle-8.5-bin.zip
         unzip -q gradle-8.5-bin.zip
 
-    - name: Show existing build.gradle
+    - name: Fix build.gradle
       run: |
-        echo "=== EXISTING build.gradle ==="
-        cat app/build.gradle 2>/dev/null || echo "NOT FOUND"
-
-    - name: Fix build.gradle (add namespace + armeabi-v7a only)
-      run: |
-        # Add namespace if missing
         if ! grep -q "namespace" app/build.gradle 2>/dev/null; then
           sed -i '/^android {/a \    namespace "uk.lgl"' app/build.gradle
-          echo "✅ Added namespace"
+          echo "Added namespace"
         fi
-
-        # Change abiFilters to armeabi-v7a only
+        
         sed -i "s/abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86'/abiFilters 'armeabi-v7a'/" app/build.gradle
-        echo "✅ Changed abiFilters to armeabi-v7a only"
-
-        # Change ndkVersion to match installed NDK
         sed -i "s/ndkVersion = '22.0.7026061'/ndkVersion '25.2.9519653'/" app/build.gradle
-        echo "✅ Updated ndkVersion"
-
+        
         echo "=== FIXED build.gradle ==="
         cat app/build.gradle
 
-    - name: Generate root build.gradle if missing
+    - name: Generate root files if missing
       run: |
         if [ ! -f "build.gradle" ]; then
           cat > build.gradle << 'EOF'
@@ -87,43 +93,22 @@ jobs:
             }
         }
         EOF
-          echo "✅ Generated root build.gradle"
         fi
 
-    - name: Generate gradle.properties if missing
-      run: |
         if [ ! -f "gradle.properties" ]; then
           cat > gradle.properties << 'EOF'
         android.useAndroidX=true
         android.enableJetifier=true
         org.gradle.jvmargs=-Xmx2048m
         EOF
-          echo "✅ Generated gradle.properties"
         fi
 
-    - name: Generate settings.gradle if missing
-      run: |
         if [ ! -f "settings.gradle" ]; then
           echo 'include ":app"' > settings.gradle
           echo 'rootProject.name = "PanDa-Mod"' >> settings.gradle
-          echo "✅ Generated settings.gradle"
         fi
 
-    - name: Generate local.properties
-      run: |
         echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
-        echo "✅ Generated local.properties"
-
-    - name: Show structure
-      run: |
-        echo "=== JAVA FILES ==="
-        find . -name "*.java" | grep -v ".git" | head -10
-        echo "=== CPP FILES ==="
-        find . -name "Main.cpp" | grep -v ".git"
-        echo "=== Android.mk ==="
-        find . -name "Android.mk" | grep -v ".git"
-        echo "=== AndroidManifest ==="
-        find . -name "AndroidManifest.xml" | grep -v ".git"
 
     - name: Build APK
       run: |
